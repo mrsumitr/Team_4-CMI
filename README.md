@@ -36,6 +36,98 @@ Evaluation metric: average of binary F1 (target vs non-target) and macro F1 acro
 3. **Training & Validation**
    - Use participant-wise splits (leave-subjects-out) to test generalization.
    - Evaluate both binary F1 and macro F1; monitor per-class F1 to detect collapse into `non_target`.
+## Architecture
+                   ┌────────────────────────────────────────┐
+                   │        CMI Sensor Dataset (Kaggle)     │
+                   │────────────────────────────────────────│
+                   │  • train.csv (time series)             │
+                   │  • test.csv (time series)              │
+                   │  • train_demographics.csv              │
+                   │  • test_demographics.csv               │
+                   └────────────────────────────────────────┘
+                                     │
+                                     ▼
+        ┌─────────────────────────────────────────────────────────────┐
+        │                 Sequence Window Extraction                  │
+        │─────────────────────────────────────────────────────────────│
+        │ For each sequence_id:                                       │
+        │   • Use LAST 30 frames (WINDOW_SIZE)                        │
+        │   • Capture gesture at end of sequence                      │
+        └─────────────────────────────────────────────────────────────┘
+                                     │
+                                     ▼
+     ┌──────────────────────────────────────────────────────────────────────────┐
+     │                         Feature Engineering                              │
+     │──────────────────────────────────────────────────────────────────────────│
+     │ 1. IMU Features (acc + rot)                                             │
+     │      • Mean, Variance, Skew, Kurtosis                                   │
+     │      • Magnitude, SMA, Corr(X,Y)                                        │
+     │      • FFT Magnitude (frequency domain)                                 │
+     │                                                                          │
+     │ 2. Thermopile Features (thm1–thm5)                                      │
+     │      • Mean, Variance                                                   │
+     │      • Gradients thm_i – thm_(i+1)                                      │
+     │                                                                          │
+     │ 3. ToF Features (5 sensors × 64 pixels)                                  │
+     │      • Min/Max proximity                                                 │
+     │      • Spatial mean + variance                                           │
+     │      • Active pixel count                                                │
+     │      • Temporal slope (trend over time)                                  │
+     └──────────────────────────────────────────────────────────────────────────┘
+                                     │
+                                     ▼
+             ┌─────────────────────────────────────────────────────┐
+             │                Merge with Demographics              │
+             │─────────────────────────────────────────────────────│
+             │   • age, height, gender, etc.                       │
+             └─────────────────────────────────────────────────────┘
+                                     │
+                                     ▼
+       ┌───────────────────────────────────────────────────────────────────┐
+       │                          Preprocessing                            │
+       │───────────────────────────────────────────────────────────────────│
+       │ Using sklearn Pipeline:                                           │
+       │   • SimpleImputer(strategy='median')                              │
+       │   • StandardScaler OR QuantileTransformer                         │
+       └───────────────────────────────────────────────────────────────────┘
+                                     │
+                                     ▼
+             ┌──────────────────────────────────────────────┐
+             │                 Model Training                │
+             │──────────────────────────────────────────────│
+             │ Baseline Models:                             │
+             │   • Logistic Regression                      │
+             │   • KNN                                      │
+             │   • Decision Tree                            │
+             │   • Random Forest                            │
+             │                                              │
+             │ Ensemble:                                    │
+             │   • VotingClassifier(LR + RF + DT)           │
+             └──────────────────────────────────────────────┘
+                                     │
+                                     ▼
+           ┌────────────────────────────────────────────────────────────┐
+           │                Optimized Modeling (XGBoost)                │
+           │────────────────────────────────────────────────────────────│
+           │ Pipeline: Imputer → QuantileTransformer → XGBoost          │
+           │ Hyperparameter tuning: RandomizedSearchCV (30 iterations)  │
+           │ Scoring metric: f1_macro                                   │
+           └────────────────────────────────────────────────────────────┘
+                                     │
+                                     ▼
+                  ┌─────────────────────────────────────────┐
+                  │              Best Model                 │
+                  │─────────────────────────────────────────│
+                  │ Retrain on FULL training dataset        │
+                  │ Predict on Test dataset                 │
+                  └─────────────────────────────────────────┘
+                                     │
+                                     ▼
+         ┌────────────────────────────────────────────────────────┐
+         │                Final Submission File                   │
+         │────────────────────────────────────────────────────────│
+         │ Columns: sequence_id , predicted_gesture               │
+         └────────────────────────────────────────────────────────┘
 
 ## Results (Summary)
 Validation Accuracy: 0.6343558282208589
